@@ -1,0 +1,122 @@
+name: Build RegTel IPA
+
+on:
+  workflow_dispatch:
+    inputs:
+      ipa_url:
+        description: 'Direct URL to decrypted Telegram .ipa'
+        required: true
+        default: 'https://github.com/corpnewt/Decrypted-IPAs/raw/main/Telegram.ipa'
+
+jobs:
+  build:
+    name: Build and Inject RegTel Tweak
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install System Dependencies
+        run: |
+          brew install dpkg ldid
+          echo "THEOS=~/theos" >> $GITHUB_ENV
+
+      - name: Set up Theos Toolchain
+        run: |
+          git clone --recursive https://github.com/theos/theos.git ~/theos
+          # Download iOS SDK (iOS 14.5 SDK for full compatibility)
+          curl -LO https://github.com/theos/sdks/raw/master/iPhoneOS14.5.sdk.tar.xz
+          tar -xf iPhoneOS14.5.sdk.tar.xz -C ~/theos/sdks/
+          rm iPhoneOS14.5.sdk.tar.xz
+
+      - name: Build Optool Injection Utility
+        run: |
+          git clone --recursive https://github.com/alexzielenski/optool.git
+          cd optool
+          xcodebuild -configuration Release -quiet
+          sudo cp build/Release/optool /usr/local/bin/
+          cd ..
+          rm -rf optool
+
+      - name: Download Decrypted Telegram IPA
+        run: |
+          curl -L "${{ github.event.inputs.ipa_url }}" -o Telegram.ipa
+          unzip -q Telegram.ipa -d temp_ipa
+          # Find the exact .app folder name
+          APP_NAME=$(ls temp_ipa/Payload | grep .app)
+          echo "APP_PATH=temp_ipa/Payload/$APP_NAME" >> $GITHUB_ENV
+          echo "BINARY_PATH=temp_ipa/Payload/$APP_NAME/Telegram" >> $GITHUB_ENV
+
+      - name: Rename App and Modify Info.plist (RegTel)
+        run: |
+          # Use PlistBuddy to modify App Name and identifiers
+          /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName RegTel" "${{ env.APP_PATH }}/Info.plist"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleName RegTel" "${{ env.APP_PATH }}/Info.plist"
+          
+          # Inject Custom Icons configuration into Info.plist
+          /usr/libexec/PlistBuddy -c "Add :CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconFiles array" "${{ env.APP_PATH }}/Info.plist"
+          /usr/libexec/PlistBuddy -c "Add :CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconFiles:0 string regress_default" "${{ env.APP_PATH }}/Info.plist"
+          
+          # Add Alternate Icons Configuration
+          /usr/libexec/PlistBuddy -c "Add :CFBundleIcons:CFBundleAlternateIcons dict" "${{ env.APP_PATH }}/Info.plist"
+          
+          # 1. Dark Premium
+          /usr/libexec/PlistBuddy -c "Add :CFBundleIcons:CFBundleAlternateIcons:dark_premium dict" "${{ env.APP_PATH }}/Info.plist"
+          /usr/libexec/PlistBuddy -c "Add :CFBundleIcons:CFBundleAlternateIcons:dark_premium:CFBundleIconFiles array" "${{ env.APP_PATH }}/Info.plist"
+          /usr/libexec/PlistBuddy -c "Add :CFBundleIcons:CFBundleAlternateIcons:dark_premium:CFBundleIconFiles:0 string dark_premium" "${{ env.APP_PATH }}/Info.plist"
+          
+          # 2. Neon Regress
+          /usr/libexec/PlistBuddy -c "Add :CFBundleIcons:CFBundleAlternateIcons:neon_regress dict" "${{ env.APP_PATH }}/Info.plist"
+          /usr/libexec/PlistBuddy -c "Add :CFBundleIcons:CFBundleAlternateIcons:neon_regress:CFBundleIconFiles array" "${{ env.APP_PATH }}/Info.plist"
+          /usr/libexec/PlistBuddy -c "Add :CFBundleIcons:CFBundleAlternateIcons:neon_regress:CFBundleIconFiles:0 string neon_regress" "${{ env.APP_PATH }}/Info.plist"
+          
+          # 3. Gold Gradient
+          /usr/libexec/PlistBuddy -c "Add :CFBundleIcons:CFBundleAlternateIcons:gold_gradient dict" "${{ env.APP_PATH }}/Info.plist"
+          /usr/libexec/PlistBuddy -c "Add :CFBundleIcons:CFBundleAlternateIcons:gold_gradient:CFBundleIconFiles array" "${{ env.APP_PATH }}/Info.plist"
+          /usr/libexec/PlistBuddy -c "Add :CFBundleIcons:CFBundleAlternateIcons:gold_gradient:CFBundleIconFiles:0 string gold_gradient" "${{ env.APP_PATH }}/Info.plist"
+
+      - name: Copy Premium Custom Icons to App Bundle
+        run: |
+          # Copy our beautiful simple custom icons into the App resources
+          if [ -d "Icons" ]; then
+            cp Icons/*.png "${{ env.APP_PATH }}/"
+          fi
+
+      - name: Compile RegTel Tweak
+        run: |
+          make clean
+          make FINALPACKAGE=1
+          # Verify that the tweak compiled successfully and the .dylib exists
+          ls -la .theos/obj/debug/
+          ls -la .theos/obj/
+
+      - name: Inject Tweak into Telegram Binary
+        run: |
+          # Create Frameworks directory if it does not exist
+          mkdir -p "${{ env.APP_PATH }}/Frameworks"
+          
+          # Copy the compiled .dylib to the Frameworks folder inside the app bundle
+          cp ".theos/obj/debug/RegTelTweak.dylib" "${{ env.APP_PATH }}/Frameworks/"
+          
+          # Sign the dylib using ldid
+          ldid -S "${{ env.APP_PATH }}/Frameworks/RegTelTweak.dylib"
+          
+          # Inject load command into the Telegram binary
+          optool install -c load -p "@executable_path/Frameworks/RegTelTweak.dylib" -t "${{ env.BINARY_PATH }}"
+          
+          # Remove original code signature to prevent launch crashes
+          rm -rf "${{ env.APP_PATH }}/_CodeSignature"
+
+      - name: Package Final RegTel IPA
+        run: |
+          cd temp_ipa
+          zip -r -q ../RegTel.ipa Payload
+          cd ..
+
+      - name: Upload Finished RegTel IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: RegTel-IPA
+          path: RegTel.ipa
+          if-no-files-found: error

@@ -1,0 +1,10 @@
+{
+    Filter = {
+        Bundles = (
+            "com.toyopagroup.telegram",
+            "com.nicegram.Nicegram",
+            "app.swiftgram.Swiftgram",
+            "com.regress.regtel"
+        );
+    };
+}

@@ -1,0 +1,8 @@
+Package: com.regress.regtel
+Name: RegTelTweak
+Depends: mobilesubstrate
+Version: 1.0.0
+Architecture: iphoneos-arm
+Description: Premium RegTel tweak with Regress custom settings category. Includes Ghost Mode, Anti-Recall, local Premium, Custom Fonts, Streamer Mode, and Material You styling.
+Maintainer: Antigravity
+Author: Antigravity
