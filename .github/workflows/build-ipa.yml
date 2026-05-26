@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       ipa_url:
-        description: 'Direct URL to decrypted Telegram .ipa'
+        description: 'Direct URL to decrypted Telegram .ipa (ignored if uploaded directly to repo)'
         required: true
         default: 'https://github.com/corpnewt/Decrypted-IPAs/raw/main/Telegram.ipa'
 
@@ -39,9 +39,19 @@ jobs:
           cd ..
           rm -rf optool
 
-      - name: Download Decrypted Telegram IPA
+      - name: Download or Locate Decrypted Telegram IPA
         run: |
-          curl -L "${{ github.event.inputs.ipa_url }}" -o Telegram.ipa
+          # Robust check to see if user has already uploaded the .ipa file directly to the repository
+          if [ -f "RegressTele.ipa" ]; then
+            echo "Found local RegressTele.ipa in repository root. Using it..."
+            cp RegressTele.ipa Telegram.ipa
+          elif [ -f "Telegram.ipa" ]; then
+            echo "Found local Telegram.ipa in repository root. Using it..."
+          else
+            echo "No local IPA found. Downloading decrypted Telegram IPA from URL..."
+            curl -L "${{ github.event.inputs.ipa_url }}" -o Telegram.ipa
+          fi
+          
           unzip -q Telegram.ipa -d temp_ipa
           # Find the exact .app folder name
           APP_NAME=$(ls temp_ipa/Payload | grep .app)
