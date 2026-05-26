@@ -54,7 +54,12 @@ jobs:
           /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName RegTel" "${{ env.APP_PATH }}/Info.plist"
           /usr/libexec/PlistBuddy -c "Set :CFBundleName RegTel" "${{ env.APP_PATH }}/Info.plist"
           
+          # Delete existing icons configuration to avoid "Entry Already Exists" error
+          /usr/libexec/PlistBuddy -c "Delete :CFBundleIcons" "${{ env.APP_PATH }}/Info.plist" 2>/dev/null || true
+          
           # Inject Custom Icons configuration into Info.plist
+          /usr/libexec/PlistBuddy -c "Add :CFBundleIcons dict" "${{ env.APP_PATH }}/Info.plist"
+          /usr/libexec/PlistBuddy -c "Add :CFBundleIcons:CFBundlePrimaryIcon dict" "${{ env.APP_PATH }}/Info.plist"
           /usr/libexec/PlistBuddy -c "Add :CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconFiles array" "${{ env.APP_PATH }}/Info.plist"
           /usr/libexec/PlistBuddy -c "Add :CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconFiles:0 string regress_default" "${{ env.APP_PATH }}/Info.plist"
           
@@ -87,17 +92,14 @@ jobs:
         run: |
           make clean
           make FINALPACKAGE=1
-          # Verify that the tweak compiled successfully and the .dylib exists
-          ls -la .theos/obj/debug/
-          ls -la .theos/obj/
 
       - name: Inject Tweak into Telegram Binary
         run: |
           # Create Frameworks directory if it does not exist
           mkdir -p "${{ env.APP_PATH }}/Frameworks"
           
-          # Copy the compiled .dylib to the Frameworks folder inside the app bundle
-          cp ".theos/obj/debug/RegTelTweak.dylib" "${{ env.APP_PATH }}/Frameworks/"
+          # Robust lookup to copy compiled dylib regardless of build profile (debug or release)
+          find .theos/obj -name "RegTelTweak.dylib" -exec cp {} "${{ env.APP_PATH }}/Frameworks/" \;
           
           # Sign the dylib using ldid
           ldid -S "${{ env.APP_PATH }}/Frameworks/RegTelTweak.dylib"
