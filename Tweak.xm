@@ -82,8 +82,8 @@ static void ensurePreferencesLoaded() {
     }
 }
 
-// MARK: - Helper Functions for Anti-Recall Hooking
-
+// MARK: - Helper Functions for Anti-Recall Hooking (Temporarily commented out for boot safety)
+/*
 static BOOL shouldBlockSqlDeleteQuery(const char *zSql) {
     if (zSql == NULL) return NO;
     
@@ -135,6 +135,8 @@ static void handleBlockedSqlMessageDeletion(const char *zSql) {
         });
     }
 }
+*/
+
 
 // MARK: - Hook: Ingesting Regress Settings into Main Telegram Settings
 
