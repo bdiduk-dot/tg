@@ -108,10 +108,24 @@ jobs:
           # Create Frameworks directory if it does not exist
           mkdir -p "${{ env.APP_PATH }}/Frameworks"
           
+          # Find substrate library inside Theos and copy it as CydiaSubstrate
+          SUBSTRATE_PATH=$(find ~/theos -name "libsubstrate.dylib" | head -n 1)
+          if [ -n "$SUBSTRATE_PATH" ]; then
+            echo "Found substrate library at $SUBSTRATE_PATH. Copying to Frameworks..."
+            cp "$SUBSTRATE_PATH" "${{ env.APP_PATH }}/Frameworks/CydiaSubstrate"
+          else
+            echo "Error: libsubstrate.dylib not found in Theos!"
+            exit 1
+          fi
+          
           # Robust lookup to copy compiled dylib regardless of build profile (debug or release)
           find .theos/obj -name "RegTelTweak.dylib" -exec cp {} "${{ env.APP_PATH }}/Frameworks/" \;
           
-          # Sign the dylib using ldid
+          # Fix CydiaSubstrate path in our tweak dylib to look locally instead of jailbreak root
+          install_name_tool -change /Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate @executable_path/Frameworks/CydiaSubstrate "${{ env.APP_PATH }}/Frameworks/RegTelTweak.dylib"
+          
+          # Sign both dylibs using ldid
+          ldid -S "${{ env.APP_PATH }}/Frameworks/CydiaSubstrate"
           ldid -S "${{ env.APP_PATH }}/Frameworks/RegTelTweak.dylib"
           
           # Inject load command into the Telegram binary
