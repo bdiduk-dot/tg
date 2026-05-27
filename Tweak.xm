@@ -81,7 +81,7 @@
         // Safe dynamically resolved access to peerId
         Ivar peerIdIvar = class_getInstanceVariable([self class], "peerId");
         if (peerIdIvar) {
-            chatId = *(int64_t *)((__bridge void *)self + ivar_getOffset(peerIdIvar));
+            chatId = *(int64_t *)((char *)(__bridge void *)self + ivar_getOffset(peerIdIvar));
         } else {
             chatId = (int64_t)[self performSelector:@selector(peerId)];
         }
@@ -96,7 +96,7 @@
     objc_setAssociatedObject(self, @selector(getChatId), @(chatId), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     
     // Add custom trash bin button if the chat has deleted messages
-    if ([[AyuMessageTracker shared] hasDeletedMessagesWithForChatId:chatId]) {
+    if ([[AyuMessageTracker shared] hasDeletedMessagesForChatId:chatId]) {
         UIBarButtonItem *trashBtn = [[UIBarButtonItem alloc] initWithTitle:@"🗑️" 
                                                                       style:UIBarButtonItemStylePlain 
                                                                      target:self 

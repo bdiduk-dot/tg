@@ -437,11 +437,11 @@ import UIKit
 
 // MARK: - RegressDeletedHistoryViewController (Displays Local Chat Deleted History)
 
-public class RegressDeletedHistoryViewController: UIViewController, UITableViewDataSource, UITableViewDelegate {
+@objc public class RegressDeletedHistoryViewController: UIViewController, UITableViewDataSource, UITableViewDelegate {
     
     private var tableView: UITableView!
     private var deletedMessages: [[String: Any]] = []
-    public var chatId: Int64 = 0
+    @objc public var chatId: Int64 = 0
     
     override public func viewDidLoad() {
         super.viewDidLoad()
