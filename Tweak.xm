@@ -4,6 +4,8 @@
 #import <objc/runtime.h>
 #import "RegTelTweak-Swift.h"
 
+// RegTel Tweak v1.0.1 - Ready for Actions Build
+
 // SQLite hook imports for Anti-Recall
 #import <sqlite3.h>
 
