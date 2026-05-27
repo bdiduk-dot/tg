@@ -4,7 +4,7 @@
 #import <objc/runtime.h>
 #import "RegTelTweak-Swift.h"
 
-// RegTel Tweak v1.0.3 - Removed dlopen and thread_local to resolve dyld deadlocks
+// RegTel Tweak v1.0.4 - Clean code, optimized and covers sqlite3_prepare_v3
 #import <sqlite3.h>
 
 // Declarations of Telegram classes to avoid compiler warnings
@@ -52,6 +52,62 @@ static void updatePreferences() {
     isGhostStories = [defaults boolForKey:@"regress_ghost_stories"];
     isScreenshotUnblock = [defaults boolForKey:@"regress_unblock_screenshots"];
     activeFont = [defaults stringForKey:@"regress_active_font"];
+}
+
+// MARK: - Helper Functions for Anti-Recall Hooking
+
+static BOOL shouldBlockSqlDeleteQuery(const char *zSql) {
+    if (zSql == NULL) return NO;
+    
+    const char *deleteQueries[] = {
+        "DELETE FROM messages",
+        "delete_message",
+        "DELETE FROM message_history",
+        "delete_message_history"
+    };
+    
+    for (int i = 0; i < 4; i++) {
+        if (strstr(zSql, deleteQueries[i]) != NULL) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
+static void handleBlockedSqlMessageDeletion(const char *zSql) {
+    NSLog(@"[RegTel] Anti-Recall: Blocked local SQLite message deletion: %s", zSql);
+    
+    // Extract numerical IDs for detailed message caching (5 to 20 digits)
+    long long msgId = 0;
+    const char *p = zSql;
+    while (*p) {
+        if (isdigit(*p)) {
+            long long val = 0;
+            int digitCount = 0;
+            while (isdigit(*p)) {
+                val = val * 10 + (*p - '0');
+                p++;
+                digitCount++;
+            }
+            if (digitCount >= 5 && digitCount <= 20) {
+                msgId = val;
+                break;
+            }
+        } else {
+            p++;
+        }
+    }
+    
+    if (msgId != 0) {
+        // Dispatch tracking asynchronously to background to keep SQLite operation thread non-blocking
+        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+            [[AyuMessageTracker shared] registerDetailedMessageDeletionWithMessageId:msgId 
+                                                                           chatId:12345 
+                                                                       senderName:@"Собеседник" 
+                                                                             text:@"[Удаленное сообщение]" 
+                                                                             date:(int32_t)[[NSDate date] timeIntervalSince1970]];
+        });
+    }
 }
 
 // MARK: - Hook: Ingesting Regress Settings into Main Telegram Settings
@@ -212,61 +268,21 @@ static void updatePreferences() {
 // MARK: - Hook: Anti-Recall (SQLite Layer & Caching)
 
 %hookf(int, sqlite3_prepare_v2, sqlite3 *db, const char *zSql, int nByte, sqlite3_stmt **ppStmt, const char **pzTail) {
-    if (zSql != NULL && isAntiRecallActive) {
-        const char *deleteQueries[] = {
-            "DELETE FROM messages",
-            "delete_message",
-            "DELETE FROM message_history",
-            "delete_message_history"
-        };
-        
-        BOOL isDeleteQuery = NO;
-        for (int i = 0; i < 4; i++) {
-            if (strstr(zSql, deleteQueries[i]) != NULL) {
-                isDeleteQuery = YES;
-                break;
-            }
-        }
-        
-        if (isDeleteQuery) {
-            NSLog(@"[RegTel] Anti-Recall: Blocked local SQLite message deletion: %s", zSql);
-            
-            // Extract numerical IDs for detailed message caching
-            long long msgId = 0;
-            const char *p = zSql;
-            while (*p) {
-                if (isdigit(*p)) {
-                    long long val = 0;
-                    int digitCount = 0;
-                    while (isdigit(*p)) {
-                        val = val * 10 + (*p - '0');
-                        p++;
-                        digitCount++;
-                    }
-                    if (digitCount >= 5 && digitCount <= 20) {
-                        msgId = val;
-                        break;
-                    }
-                } else {
-                    p++;
-                }
-            }
-            
-            if (msgId != 0) {
-                dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-                    [[AyuMessageTracker shared] registerDetailedMessageDeletionWithMessageId:msgId 
-                                                                                   chatId:12345 
-                                                                               senderName:@"Собеседник" 
-                                                                                     text:@"[Удаленное сообщение]" 
-                                                                                     date:(int32_t)[[NSDate date] timeIntervalSince1970]];
-                });
-            }
-            
-            *ppStmt = NULL;
-            return SQLITE_OK;
-        }
+    if (zSql != NULL && isAntiRecallActive && shouldBlockSqlDeleteQuery(zSql)) {
+        handleBlockedSqlMessageDeletion(zSql);
+        *ppStmt = NULL;
+        return SQLITE_OK;
     }
     return %orig(db, zSql, nByte, ppStmt, pzTail);
+}
+
+%hookf(int, sqlite3_prepare_v3, sqlite3 *db, const char *zSql, int nByte, unsigned int prepFlags, sqlite3_stmt **ppStmt, const char **pzTail) {
+    if (zSql != NULL && isAntiRecallActive && shouldBlockSqlDeleteQuery(zSql)) {
+        handleBlockedSqlMessageDeletion(zSql);
+        *ppStmt = NULL;
+        return SQLITE_OK;
+    }
+    return %orig(db, zSql, nByte, prepFlags, ppStmt, pzTail);
 }
 
 // MARK: - Hook: Tab Bar Navigation customizer

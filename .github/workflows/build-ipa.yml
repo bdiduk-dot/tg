@@ -55,8 +55,13 @@ jobs:
           unzip -q Telegram.ipa -d temp_ipa
           # Find the exact .app folder name
           APP_NAME=$(ls temp_ipa/Payload | grep .app)
-          echo "APP_PATH=temp_ipa/Payload/$APP_NAME" >> $GITHUB_ENV
-          echo "BINARY_PATH=temp_ipa/Payload/$APP_NAME/Telegram" >> $GITHUB_ENV
+          APP_PATH="temp_ipa/Payload/$APP_NAME"
+          echo "APP_PATH=$APP_PATH" >> $GITHUB_ENV
+          
+          # Dynamically resolve main executable binary name using PlistBuddy
+          BINARY_NAME=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$APP_PATH/Info.plist")
+          echo "BINARY_PATH=$APP_PATH/$BINARY_NAME" >> $GITHUB_ENV
+
 
       - name: Rename App and Modify Info.plist (RegTel)
         run: |
