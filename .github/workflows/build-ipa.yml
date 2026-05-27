@@ -34,7 +34,7 @@ jobs:
         run: |
           git clone --recursive https://github.com/alexzielenski/optool.git
           cd optool
-          xcodebuild -configuration Release -quiet
+          xcodebuild -configuration Release -quiet MACOSX_DEPLOYMENT_TARGET=10.15
           sudo cp build/Release/optool /usr/local/bin/
           cd ..
           rm -rf optool
