@@ -170,8 +170,8 @@ import Foundation
             self.deletedMessageIds.removeAll()
             self.deletedMessagesByChat.removeAll()
             self.editedHistory.removeAll()
-            try? FileManager.default.removeItem(self.deletedFileUrl)
-            try? FileManager.default.removeItem(self.editedFileUrl)
+            try? FileManager.default.removeItem(at: self.deletedFileUrl)
+            try? FileManager.default.removeItem(at: self.editedFileUrl)
         }
     }
 }
