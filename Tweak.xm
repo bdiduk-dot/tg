@@ -129,6 +129,8 @@
 
 // MARK: - Hook: Ghost Mode, Screenshots & Stories (MTProto Network Layer)
 
+%group MTProtoHooks
+
 %hook MTProto
 
 - (void)enqueueRequest:(MTRequest *)request {
@@ -182,6 +184,8 @@
     
     %orig(request);
 }
+
+%end
 
 %end
 
@@ -269,6 +273,8 @@
 
 // MARK: - Hook: Streamer Mode & Custom Profile Badges (ASTextNode)
 
+%group ASTextNodeHooks
+
 %hook ASTextNode
 
 - (void)setAttributedText:(NSAttributedString *)attributedText {
@@ -321,6 +327,8 @@
 
 %end
 
+%end
+
 // MARK: - Hook: Custom Font Customizer (UIFont Swizzling)
 
 %hook UIFont
@@ -366,7 +374,33 @@
 
 // MARK: - Hook Initialization & Dynamic Class Resolver
 
+#import <dlfcn.h>
+
 %ctor {
+    // 1. Explicitly load Telegram's internal frameworks to ensure their classes are registered in the runtime
+    dlopen("@executable_path/Frameworks/MTProtoKit.framework/MTProtoKit", RTLD_NOW);
+    dlopen("@executable_path/Frameworks/Display.framework/Display", RTLD_NOW);
+    dlopen("@executable_path/Frameworks/TelegramUI.framework/TelegramUI", RTLD_NOW);
+    
+    // 2. Initialize MTProtoHooks if MTProto class is resolved
+    Class mtProtoClass = objc_getClass("MTProto");
+    if (mtProtoClass) {
+        %init(MTProtoHooks);
+        NSLog(@"[RegTel] Successfully hooked MTProto");
+    } else {
+        NSLog(@"[RegTel] Warning: MTProto class not found");
+    }
+    
+    // 3. Initialize ASTextNodeHooks if ASTextNode class is resolved
+    Class textNodeClass = objc_getClass("ASTextNode");
+    if (textNodeClass) {
+        %init(ASTextNodeHooks);
+        NSLog(@"[RegTel] Successfully hooked ASTextNode");
+    } else {
+        NSLog(@"[RegTel] Warning: ASTextNode class not found");
+    }
+    
+    // 4. Initialize TelegramUIHooks if settings/chat controllers are resolved
     Class itemListClass = objc_getClass("TelegramUI.ItemListController");
     if (!itemListClass) {
         itemListClass = objc_getClass("_TtC10TelegramUI18ItemListController");
@@ -379,9 +413,11 @@
     
     if (itemListClass && chatClass) {
         %init(TelegramUIHooks, TelegramUI_ItemListController = itemListClass, TelegramUI_ChatController = chatClass);
+        NSLog(@"[RegTel] Successfully hooked TelegramUI controllers");
     } else {
-        NSLog(@"[RegTel] Warning: TelegramUI.ItemListController or TelegramUI.ChatController not found. Settings panel hooks skipped.");
+        NSLog(@"[RegTel] Warning: ItemListController or ChatController not found");
     }
     
+    // 5. Initialize standard UIKit hooks (UITabBarController, UIScreen, UIFont)
     %init(_ungrouped);
 }
