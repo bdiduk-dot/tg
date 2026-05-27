@@ -108,16 +108,11 @@ jobs:
           # Create Frameworks directory if it does not exist
           mkdir -p "${{ env.APP_PATH }}/Frameworks"
           
-          # Find substrate library inside Theos and copy it as CydiaSubstrate
-          SUBSTRATE_PATH=$(find ~/theos -name "libsubstrate.dylib" | head -n 1)
-          if [ -n "$SUBSTRATE_PATH" ]; then
-            echo "Found substrate library at $SUBSTRATE_PATH. Copying to Frameworks..."
-            cp "$SUBSTRATE_PATH" "${{ env.APP_PATH }}/Frameworks/CydiaSubstrate"
-          else
-            echo "Error: libsubstrate.dylib not found in Theos!"
-            exit 1
-          fi
+          # Download precompiled libsubstrate.dylib (arm64/armv7) from MonkeyDev
+          echo "Downloading CydiaSubstrate library..."
+          curl -Lo "${{ env.APP_PATH }}/Frameworks/CydiaSubstrate" https://github.com/AloneMonkey/MonkeyDev/raw/master/Frameworks/libsubstrate.dylib
           
+
           # Robust lookup to copy compiled dylib regardless of build profile (debug or release)
           find .theos/obj -name "RegTelTweak.dylib" -exec cp {} "${{ env.APP_PATH }}/Frameworks/" \;
           
