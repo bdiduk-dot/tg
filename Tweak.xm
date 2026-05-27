@@ -4,9 +4,8 @@
 #import <objc/runtime.h>
 #import "RegTelTweak-Swift.h"
 
-// RegTel Tweak v1.0.2 - Fixed Recursion & Deadlocks
+// RegTel Tweak v1.0.3 - Removed dlopen and thread_local to resolve dyld deadlocks
 #import <sqlite3.h>
-#import <dlfcn.h>
 
 // Declarations of Telegram classes to avoid compiler warnings
 @interface TelegramUI_ItemListController : UIViewController
@@ -212,13 +211,7 @@ static void updatePreferences() {
 
 // MARK: - Hook: Anti-Recall (SQLite Layer & Caching)
 
-static thread_local bool isInsideSqliteHook = false;
-
 %hookf(int, sqlite3_prepare_v2, sqlite3 *db, const char *zSql, int nByte, sqlite3_stmt **ppStmt, const char **pzTail) {
-    if (isInsideSqliteHook) {
-        return %orig(db, zSql, nByte, ppStmt, pzTail);
-    }
-    
     if (zSql != NULL && isAntiRecallActive) {
         const char *deleteQueries[] = {
             "DELETE FROM messages",
@@ -237,8 +230,6 @@ static thread_local bool isInsideSqliteHook = false;
         
         if (isDeleteQuery) {
             NSLog(@"[RegTel] Anti-Recall: Blocked local SQLite message deletion: %s", zSql);
-            
-            isInsideSqliteHook = true;
             
             // Extract numerical IDs for detailed message caching
             long long msgId = 0;
@@ -270,8 +261,6 @@ static thread_local bool isInsideSqliteHook = false;
                                                                                      date:(int32_t)[[NSDate date] timeIntervalSince1970]];
                 });
             }
-            
-            isInsideSqliteHook = false;
             
             *ppStmt = NULL;
             return SQLITE_OK;
@@ -425,11 +414,6 @@ static thread_local bool isInsideSqliteHook = false;
 // MARK: - Hook Initialization & Dynamic Class Resolver
 
 %ctor {
-    // 1. Explicitly load Telegram's internal frameworks to ensure their classes are registered in the runtime
-    dlopen("@executable_path/Frameworks/MTProtoKit.framework/MTProtoKit", RTLD_NOW);
-    dlopen("@executable_path/Frameworks/Display.framework/Display", RTLD_NOW);
-    dlopen("@executable_path/Frameworks/TelegramUI.framework/TelegramUI", RTLD_NOW);
-    
     // Initialize preferences cache
     updatePreferences();
     
@@ -441,7 +425,7 @@ static thread_local bool isInsideSqliteHook = false;
                                                       updatePreferences();
                                                   }];
     
-    // 2. Initialize MTProtoHooks if MTProto class is resolved
+    // 1. Initialize MTProtoHooks if MTProto class is resolved
     Class mtProtoClass = objc_getClass("MTProto");
     if (mtProtoClass) {
         %init(MTProtoHooks);
@@ -450,7 +434,7 @@ static thread_local bool isInsideSqliteHook = false;
         NSLog(@"[RegTel] Warning: MTProto class not found");
     }
     
-    // 3. Initialize ASTextNodeHooks if ASTextNode class is resolved
+    // 2. Initialize ASTextNodeHooks if ASTextNode class is resolved
     Class textNodeClass = objc_getClass("ASTextNode");
     if (textNodeClass) {
         %init(ASTextNodeHooks);
@@ -459,7 +443,7 @@ static thread_local bool isInsideSqliteHook = false;
         NSLog(@"[RegTel] Warning: ASTextNode class not found");
     }
     
-    // 4. Initialize TelegramUIHooks if settings/chat controllers are resolved
+    // 3. Initialize TelegramUIHooks if settings/chat controllers are resolved
     Class itemListClass = objc_getClass("TelegramUI.ItemListController");
     if (!itemListClass) {
         itemListClass = objc_getClass("_TtC10TelegramUI18ItemListController");
@@ -477,6 +461,6 @@ static thread_local bool isInsideSqliteHook = false;
         NSLog(@"[RegTel] Warning: ItemListController or ChatController not found");
     }
     
-    // 5. Initialize standard UIKit hooks (UITabBarController, UIScreen, UIFont)
+    // 4. Initialize standard UIKit hooks (UITabBarController, UIScreen, UIFont)
     %init(_ungrouped);
 }
