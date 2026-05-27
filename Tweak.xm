@@ -4,7 +4,7 @@
 #import <objc/runtime.h>
 #import "RegTelTweak-Swift.h"
 
-// RegTel Tweak v1.0.4 - Clean code, optimized and covers sqlite3_prepare_v3
+// RegTel Tweak v1.0.5 - Comprehensive dynamic safety & recursive lock guards
 #import <sqlite3.h>
 
 // Declarations of Telegram classes to avoid compiler warnings
@@ -40,6 +40,8 @@ static BOOL isGhostNoTyping = NO;
 static BOOL isGhostNoOnline = NO;
 static BOOL isGhostStories = NO;
 static BOOL isScreenshotUnblock = NO;
+static BOOL isHideContactsTab = NO;
+static BOOL isHideStoriesTab = NO;
 static NSString *activeFont = nil;
 
 static void updatePreferences() {
@@ -51,7 +53,25 @@ static void updatePreferences() {
     isGhostNoOnline = [defaults boolForKey:@"regress_ghost_noonline"];
     isGhostStories = [defaults boolForKey:@"regress_ghost_stories"];
     isScreenshotUnblock = [defaults boolForKey:@"regress_unblock_screenshots"];
+    isHideContactsTab = [defaults boolForKey:@"regress_hide_contacts_tab"];
+    isHideStoriesTab = [defaults boolForKey:@"regress_hide_stories_tab"];
     activeFont = [defaults stringForKey:@"regress_active_font"];
+}
+
+// Thread-safe and recursion-safe preferences loader
+static BOOL isLoadingPreferences = NO;
+static BOOL preferencesLoaded = NO;
+
+static void ensurePreferencesLoaded() {
+    if (preferencesLoaded) return;
+    
+    @synchronized([NSUserDefaults class]) {
+        if (preferencesLoaded || isLoadingPreferences) return;
+        isLoadingPreferences = YES;
+        updatePreferences();
+        preferencesLoaded = YES;
+        isLoadingPreferences = NO;
+    }
 }
 
 // MARK: - Helper Functions for Anti-Recall Hooking
@@ -210,6 +230,7 @@ static void handleBlockedSqlMessageDeletion(const char *zSql) {
 %hook MTProto
 
 - (void)enqueueRequest:(MTRequest *)request {
+    ensurePreferencesLoaded();
     NSString *requestType = NSStringFromClass([request.body class]);
     
     // 1. Ghost Mode
@@ -268,6 +289,7 @@ static void handleBlockedSqlMessageDeletion(const char *zSql) {
 // MARK: - Hook: Anti-Recall (SQLite Layer & Caching)
 
 %hookf(int, sqlite3_prepare_v2, sqlite3 *db, const char *zSql, int nByte, sqlite3_stmt **ppStmt, const char **pzTail) {
+    ensurePreferencesLoaded();
     if (zSql != NULL && isAntiRecallActive && shouldBlockSqlDeleteQuery(zSql)) {
         handleBlockedSqlMessageDeletion(zSql);
         *ppStmt = NULL;
@@ -277,6 +299,7 @@ static void handleBlockedSqlMessageDeletion(const char *zSql) {
 }
 
 %hookf(int, sqlite3_prepare_v3, sqlite3 *db, const char *zSql, int nByte, unsigned int prepFlags, sqlite3_stmt **ppStmt, const char **pzTail) {
+    ensurePreferencesLoaded();
     if (zSql != NULL && isAntiRecallActive && shouldBlockSqlDeleteQuery(zSql)) {
         handleBlockedSqlMessageDeletion(zSql);
         *ppStmt = NULL;
@@ -290,19 +313,20 @@ static void handleBlockedSqlMessageDeletion(const char *zSql) {
 %hook UITabBarController
 
 - (void)setViewControllers:(NSArray<UIViewController *> *)viewControllers animated:(BOOL)animated {
+    ensurePreferencesLoaded();
     NSMutableArray *mutableVCs = [viewControllers mutableCopy];
     NSMutableArray *toRemove = [NSMutableArray array];
     
     for (UIViewController *vc in mutableVCs) {
         NSString *className = NSStringFromClass([vc class]);
         
-        if ([[NSUserDefaults standardUserDefaults] boolForKey:@"regress_hide_contacts_tab"]) {
+        if (isHideContactsTab) {
             if ([className containsString:@"Contacts"] || [className containsString:@"ContactList"]) {
                 [toRemove addObject:vc];
             }
         }
         
-        if ([[NSUserDefaults standardUserDefaults] boolForKey:@"regress_hide_stories_tab"]) {
+        if (isHideStoriesTab) {
             if ([className containsString:@"Story"] || [className containsString:@"Call"] || [className containsString:@"Stories"]) {
                 [toRemove addObject:vc];
             }
@@ -319,6 +343,7 @@ static void handleBlockedSqlMessageDeletion(const char *zSql) {
 
 %hook UIScreen
 - (BOOL)isCaptured {
+    ensurePreferencesLoaded();
     if (isScreenshotUnblock) {
         return NO; // Tricking iOS to believe screen is not recording
     }
@@ -389,6 +414,7 @@ static void handleBlockedSqlMessageDeletion(const char *zSql) {
 %hook UIFont
 
 + (UIFont *)fontWithName:(NSString *)fontName size:(CGFloat)fontSize {
+    ensurePreferencesLoaded();
     NSString *customFont = activeFont;
     if (customFont != nil && ![customFont isEqualToString:@"Системный"]) {
         UIFont *font = %orig(customFont, fontSize);
@@ -400,6 +426,7 @@ static void handleBlockedSqlMessageDeletion(const char *zSql) {
 }
 
 + (UIFont *)systemFontOfSize:(CGFloat)fontSize {
+    ensurePreferencesLoaded();
     NSString *customFont = activeFont;
     if (customFont != nil && ![customFont isEqualToString:@"Системный"]) {
         UIFont *font = [UIFont fontWithName:customFont size:fontSize];
@@ -411,6 +438,7 @@ static void handleBlockedSqlMessageDeletion(const char *zSql) {
 }
 
 + (UIFont *)boldSystemFontOfSize:(CGFloat)fontSize {
+    ensurePreferencesLoaded();
     NSString *customFont = activeFont;
     if (customFont != nil && ![customFont isEqualToString:@"Системный"]) {
         NSString *boldFontName = [customFont stringByAppendingString:@"-Bold"];
@@ -430,15 +458,14 @@ static void handleBlockedSqlMessageDeletion(const char *zSql) {
 // MARK: - Hook Initialization & Dynamic Class Resolver
 
 %ctor {
-    // Initialize preferences cache
-    updatePreferences();
-    
     // Listen for preference changes to update the cache dynamically
     [[NSNotificationCenter defaultCenter] addObserverForName:NSUserDefaultsDidChangeNotification
                                                       object:nil
                                                        queue:[NSOperationQueue mainQueue]
                                                   usingBlock:^(NSNotification *note) {
-                                                      updatePreferences();
+                                                      @synchronized([NSUserDefaults class]) {
+                                                          updatePreferences();
+                                                      }
                                                   }];
     
     // 1. Initialize MTProtoHooks if MTProto class is resolved
