@@ -19,7 +19,7 @@ jobs:
 
       - name: Install System Dependencies
         run: |
-          brew install dpkg
+          brew install dpkg ldid
           echo "THEOS=~/theos" >> $GITHUB_ENV
 
 
