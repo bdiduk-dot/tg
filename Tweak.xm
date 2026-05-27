@@ -4,7 +4,7 @@
 #import <objc/runtime.h>
 #import "RegTelTweak-Swift.h"
 
-// RegTel Tweak v1.0.6 - Final Production Safety & Cache Enhancements
+// RegTel Tweak v1.0.7 - High Stability build for Jailed iOS 17 (C-hooks & UIFont swizzles disabled for boot safety)
 #import <sqlite3.h>
 
 // Declarations of Telegram classes to avoid compiler warnings
@@ -32,7 +32,7 @@
 @property (nonatomic) int32_t ttl;
 @end
 
-// Static variables for caching preferences (Prevents infinite recursion and deadlocks in SQLite and UIFont)
+// Static variables for caching preferences
 static BOOL isAntiRecallActive = NO;
 static BOOL isGhostMaster = NO;
 static BOOL isGhostNoRead = NO;
@@ -62,7 +62,7 @@ static void updatePreferences() {
     activeFont = [defaults stringForKey:@"regress_active_font"];
 }
 
-// Thread-safe and recursion-safe preferences loader
+// Thread-safe preferences loader
 static BOOL isLoadingPreferences = NO;
 static BOOL preferencesLoaded = NO;
 
@@ -70,9 +70,6 @@ static void ensurePreferencesLoaded() {
     if (preferencesLoaded) return;
     
     if (![NSThread isMainThread]) {
-        // If we are on a background thread and preferences are not loaded yet,
-        // do NOT block or load them (to avoid deadlocking the main thread).
-        // Just return and let the background thread use default values for now.
         return;
     }
     
@@ -108,7 +105,6 @@ static BOOL shouldBlockSqlDeleteQuery(const char *zSql) {
 static void handleBlockedSqlMessageDeletion(const char *zSql) {
     NSLog(@"[RegTel] Anti-Recall: Blocked local SQLite message deletion: %s", zSql);
     
-    // Extract numerical IDs for detailed message caching (5 to 20 digits)
     long long msgId = 0;
     const char *p = zSql;
     while (*p) {
@@ -130,7 +126,6 @@ static void handleBlockedSqlMessageDeletion(const char *zSql) {
     }
     
     if (msgId != 0) {
-        // Dispatch tracking asynchronously to background to keep SQLite operation thread non-blocking
         dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
             [[AyuMessageTracker shared] registerDetailedMessageDeletionWithMessageId:msgId 
                                                                            chatId:12345 
@@ -297,8 +292,8 @@ static void handleBlockedSqlMessageDeletion(const char *zSql) {
 
 %end
 
-// MARK: - Hook: Anti-Recall (SQLite Layer & Caching)
-
+// MARK: - Hook: Anti-Recall (Temporarily disabled for iOS 17 Boot Stability)
+/*
 %hookf(int, sqlite3_prepare_v2, sqlite3 *db, const char *zSql, int nByte, sqlite3_stmt **ppStmt, const char **pzTail) {
     ensurePreferencesLoaded();
     if (zSql != NULL && isAntiRecallActive && shouldBlockSqlDeleteQuery(zSql)) {
@@ -318,6 +313,7 @@ static void handleBlockedSqlMessageDeletion(const char *zSql) {
     }
     return %orig(db, zSql, nByte, prepFlags, ppStmt, pzTail);
 }
+*/
 
 // MARK: - Hook: Tab Bar Navigation customizer
 
@@ -420,8 +416,8 @@ static void handleBlockedSqlMessageDeletion(const char *zSql) {
 
 %end
 
-// MARK: - Hook: Custom Font Customizer (UIFont Swizzling)
-
+// MARK: - Hook: Custom Font Customizer (UIFont Swizzling - Temporarily disabled for layout compatibility)
+/*
 %hook UIFont
 
 + (UIFont *)fontWithName:(NSString *)fontName size:(CGFloat)fontSize {
@@ -465,6 +461,7 @@ static void handleBlockedSqlMessageDeletion(const char *zSql) {
 }
 
 %end
+*/
 
 // MARK: - Hook Initialization & Dynamic Class Resolver
 
@@ -515,6 +512,6 @@ static void handleBlockedSqlMessageDeletion(const char *zSql) {
         NSLog(@"[RegTel] Warning: ItemListController or ChatController not found");
     }
     
-    // 4. Initialize standard UIKit hooks (UITabBarController, UIScreen, UIFont)
+    // 4. Initialize standard UIKit hooks (UITabBarController, UIScreen)
     %init(_ungrouped);
 }
