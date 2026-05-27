@@ -36,7 +36,9 @@
 
 // MARK: - Hook: Ingesting Regress Settings into Main Telegram Settings
 
-%hook ItemListController
+%group TelegramUIHooks
+
+%hook TelegramUI_ItemListController
 
 - (void)viewWillAppear:(BOOL)animated {
     %orig(animated);
@@ -50,8 +52,8 @@
         // Add a gorgeous, glowing native-looking button "Regress ⚙️" in the top right
         UIBarButtonItem *regressItem = [[UIBarButtonItem alloc] initWithTitle:@"Regress ⚙️" 
                                                                         style:UIBarButtonItemStyleDone 
-                                                                       target:self 
-                                                                       action:@selector(openRegressSettingsPanel)];
+                                                                        target:self 
+                                                                        action:@selector(openRegressSettingsPanel)];
         
         // Set glowing Material 3 cyan brand color
         regressItem.tintColor = [UIColor systemTealColor];
@@ -70,7 +72,7 @@
 
 // MARK: - Hook: Chat Controller (Adds a Trash Button 🗑️ to view deleted chat history)
 
-%hook ChatController
+%hook TelegramUI_ChatController
 
 - (void)viewWillAppear:(BOOL)animated {
     %orig(animated);
@@ -120,6 +122,8 @@
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:historyVC];
     [self presentViewController:nav animated:YES completion:nil];
 }
+
+%end
 
 %end
 
@@ -248,45 +252,9 @@
 
 %end
 
-// MARK: - Hook: Local Premium
+// MARK: - Hook: Local Premium (Disabled client-side to prevent crashes on non-existent Swift model classes)
 
-%hook TelegramUser
-- (BOOL)isPremium {
-    if ([[NSUserDefaults standardUserDefaults] boolForKey:@"regress_local_premium"]) {
-        return YES;
-    }
-    return %orig;
-}
-%end
-
-%hook User
-- (BOOL)isPremium {
-    if ([[NSUserDefaults standardUserDefaults] boolForKey:@"regress_local_premium"]) {
-        return YES;
-    }
-    return %orig;
-}
-%end
-
-// MARK: - Hook: Save Self-Destructing Media (View-Once TTL Bypass)
-
-%hook Message
-- (int32_t)ttl {
-    if ([[NSUserDefaults standardUserDefaults] boolForKey:@"regress_save_selfdestruct"]) {
-        return 0; // Force TTL to 0 to prevent client-side auto-destruction!
-    }
-    return %orig;
-}
-%end
-
-%hook StoreMessage
-- (int32_t)ttl {
-    if ([[NSUserDefaults standardUserDefaults] boolForKey:@"regress_save_selfdestruct"]) {
-        return 0; // Force TTL to 0 to prevent client-side auto-destruction!
-    }
-    return %orig;
-}
-%end
+// MARK: - Hook: Save Self-Destructing Media (Disabled client-side to prevent crashes on non-existent Swift model classes)
 
 // MARK: - Hook: Screenshot Unblocker (System screen capture bypass)
 
@@ -395,3 +363,25 @@
 }
 
 %end
+
+// MARK: - Hook Initialization & Dynamic Class Resolver
+
+%ctor {
+    Class itemListClass = objc_getClass("TelegramUI.ItemListController");
+    if (!itemListClass) {
+        itemListClass = objc_getClass("_TtC10TelegramUI18ItemListController");
+    }
+    
+    Class chatClass = objc_getClass("TelegramUI.ChatController");
+    if (!chatClass) {
+        chatClass = objc_getClass("_TtC10TelegramUI14ChatController");
+    }
+    
+    if (itemListClass && chatClass) {
+        %init(TelegramUIHooks, TelegramUI_ItemListController = itemListClass, TelegramUI_ChatController = chatClass);
+    } else {
+        NSLog(@"[RegTel] Warning: TelegramUI.ItemListController or TelegramUI.ChatController not found. Settings panel hooks skipped.");
+    }
+    
+    %init(_ungrouped);
+}
