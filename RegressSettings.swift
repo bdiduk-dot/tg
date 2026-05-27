@@ -390,7 +390,7 @@ import UIKit
         let supportsKey = "supportsAlternateAppIcons"
         guard let supports = UIApplication.shared.value(forKey: supportsKey) as? Bool, supports else { return }
         let apiName = (iconName == "Regress Default") ? nil : iconName.replacingOccurrences(of: " ", with: "_").lowercased()
-        UIApplication.shared.perform(Selector(("setAlternateIconName:")), with: apiName)
+        UIApplication.shared.perform(Selector(("setAlternateIconName:completionHandler:")), with: apiName, with: nil)
     }
     
     private func presentBadgePicker() {
