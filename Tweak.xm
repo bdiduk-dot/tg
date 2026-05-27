@@ -57,7 +57,7 @@
         
         // Set glowing Material 3 cyan brand color
         regressItem.tintColor = [UIColor systemTealColor];
-        self.navigationItem.rightBarButtonItem = regressItem;
+        [[self navigationItem] setRightBarButtonItem:regressItem];
     }
 }
 
@@ -91,7 +91,7 @@
     
     if (chatId == 0) {
         // Fallback to controller hash as identifier
-        chatId = (int64_t)self.hash;
+        chatId = (int64_t)[self hash];
     }
     
     // Associate the chatId for recovery inside click handlers
@@ -104,7 +104,7 @@
                                                                      target:self 
                                                                      action:@selector(openDeletedHistoryPanel)];
         trashBtn.tintColor = [UIColor systemRedColor];
-        self.navigationItem.rightBarButtonItem = trashBtn;
+        [[self navigationItem] setRightBarButtonItem:trashBtn];
     }
 }
 
