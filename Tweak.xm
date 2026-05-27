@@ -10,11 +10,11 @@
 #import <sqlite3.h>
 
 // Declarations of Telegram classes to avoid compiler warnings
-@interface ItemListController : UIViewController
+@interface TelegramUI_ItemListController : UIViewController
 - (NSString *)title;
 @end
 
-@interface ChatController : UIViewController
+@interface TelegramUI_ChatController : UIViewController
 - (int64_t)getChatId;
 @end
 
