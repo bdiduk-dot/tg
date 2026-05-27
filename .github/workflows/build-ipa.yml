@@ -139,6 +139,11 @@ jobs:
           
           # Remove original code signature to prevent launch crashes
           rm -rf "${{ env.APP_PATH }}/_CodeSignature"
+          
+          # Remove PlugIns (App Extensions) and Watch app as they cannot be signed with free Apple IDs and cause crashes
+          rm -rf "${{ env.APP_PATH }}/PlugIns" || true
+          rm -rf "${{ env.APP_PATH }}/Watch" || true
+
 
       - name: Package Final RegTel IPA
         run: |
