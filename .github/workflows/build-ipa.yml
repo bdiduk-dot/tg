@@ -19,8 +19,9 @@ jobs:
 
       - name: Install System Dependencies
         run: |
-          brew install dpkg ldid
+          brew install dpkg
           echo "THEOS=~/theos" >> $GITHUB_ENV
+
 
       - name: Set up Theos Toolchain
         run: |
@@ -128,9 +129,10 @@ jobs:
           
 
           
-          # Sign both dylibs using ldid
-          ldid -S "${{ env.APP_PATH }}/Frameworks/CydiaSubstrate"
-          ldid -S "${{ env.APP_PATH }}/Frameworks/RegTelTweak.dylib"
+          # Sign both dylibs using codesign (standard macOS utility, more robust than ldid)
+          codesign -f -s - "${{ env.APP_PATH }}/Frameworks/CydiaSubstrate"
+          codesign -f -s - "${{ env.APP_PATH }}/Frameworks/RegTelTweak.dylib"
+
           
           # Inject load command into the Telegram binary
           optool install -c load -p "@executable_path/Frameworks/RegTelTweak.dylib" -t "${{ env.BINARY_PATH }}"
