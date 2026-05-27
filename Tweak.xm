@@ -4,7 +4,7 @@
 #import <objc/runtime.h>
 #import "RegTelTweak-Swift.h"
 
-// RegTel Tweak v1.0.5 - Comprehensive dynamic safety & recursive lock guards
+// RegTel Tweak v1.0.6 - Final Production Safety & Cache Enhancements
 #import <sqlite3.h>
 
 // Declarations of Telegram classes to avoid compiler warnings
@@ -42,6 +42,8 @@ static BOOL isGhostStories = NO;
 static BOOL isScreenshotUnblock = NO;
 static BOOL isHideContactsTab = NO;
 static BOOL isHideStoriesTab = NO;
+static BOOL isStreamerMode = NO;
+static NSString *profileBadge = nil;
 static NSString *activeFont = nil;
 
 static void updatePreferences() {
@@ -55,6 +57,8 @@ static void updatePreferences() {
     isScreenshotUnblock = [defaults boolForKey:@"regress_unblock_screenshots"];
     isHideContactsTab = [defaults boolForKey:@"regress_hide_contacts_tab"];
     isHideStoriesTab = [defaults boolForKey:@"regress_hide_stories_tab"];
+    isStreamerMode = [defaults boolForKey:@"regress_streamer_mode"];
+    profileBadge = [defaults stringForKey:@"regress_profile_badge"];
     activeFont = [defaults stringForKey:@"regress_active_font"];
 }
 
@@ -64,6 +68,13 @@ static BOOL preferencesLoaded = NO;
 
 static void ensurePreferencesLoaded() {
     if (preferencesLoaded) return;
+    
+    if (![NSThread isMainThread]) {
+        // If we are on a background thread and preferences are not loaded yet,
+        // do NOT block or load them (to avoid deadlocking the main thread).
+        // Just return and let the background thread use default values for now.
+        return;
+    }
     
     @synchronized([NSUserDefaults class]) {
         if (preferencesLoaded || isLoadingPreferences) return;
@@ -358,13 +369,14 @@ static void handleBlockedSqlMessageDeletion(const char *zSql) {
 %hook ASTextNode
 
 - (void)setAttributedText:(NSAttributedString *)attributedText {
+    ensurePreferencesLoaded();
     if (attributedText != nil) {
         NSString *string = [attributedText string];
         NSMutableAttributedString *mutableCopy = [attributedText mutableCopy];
         BOOL modified = NO;
         
         // 1. Streamer Mode Masking
-        if ([[NSUserDefaults standardUserDefaults] boolForKey:@"regress_streamer_mode"]) {
+        if (isStreamerMode) {
             NSRegularExpression *phoneRegex = [NSRegularExpression regularExpressionWithPattern:@"\\+[0-9]{10,15}" options:0 error:nil];
             NSRegularExpression *usernameRegex = [NSRegularExpression regularExpressionWithPattern:@"@[a-zA-Z0-9_]{3,32}" options:0 error:nil];
             
@@ -382,14 +394,13 @@ static void handleBlockedSqlMessageDeletion(const char *zSql) {
         }
         
         // 2. Custom Profile Badges Injection
-        NSString *selectedBadge = [[NSUserDefaults standardUserDefaults] stringForKey:@"regress_profile_badge"];
-        if (selectedBadge != nil && ![selectedBadge isEqualToString:@"Без значка"]) {
+        if (profileBadge != nil && ![profileBadge isEqualToString:@"Без значка"]) {
             NSString *badgeChar = @"";
-            if ([selectedBadge containsString:@"👑"]) badgeChar = @" 👑";
-            else if ([selectedBadge containsString:@"🛡️"]) badgeChar = @" 🛡️";
-            else if ([selectedBadge containsString:@"👻"]) badgeChar = @" 👻";
-            else if ([selectedBadge containsString:@"⚡"]) badgeChar = @" ⚡";
-            else if ([selectedBadge containsString:@"⭐"]) badgeChar = @" ⭐";
+            if ([profileBadge containsString:@"👑"]) badgeChar = @" 👑";
+            else if ([profileBadge containsString:@"🛡️"]) badgeChar = @" 🛡️";
+            else if ([profileBadge containsString:@"👻"]) badgeChar = @" 👻";
+            else if ([profileBadge containsString:@"⚡"]) badgeChar = @" ⚡";
+            else if ([profileBadge containsString:@"⭐"]) badgeChar = @" ⭐";
             
             if ([string isEqualToString:@"You"] || [string isEqualToString:@"Избранное"] || [string isEqualToString:@"Saved Messages"] || [string isEqualToString:@"Regress"]) {
                 [mutableCopy appendAttributedString:[[NSAttributedString alloc] initWithString:badgeChar attributes:[attributedText attributesAtIndex:0 effectiveRange:NULL]]];
