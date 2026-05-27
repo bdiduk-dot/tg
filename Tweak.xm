@@ -4,10 +4,9 @@
 #import <objc/runtime.h>
 #import "RegTelTweak-Swift.h"
 
-// RegTel Tweak v1.0.1 - Ready for Actions Build
-
-// SQLite hook imports for Anti-Recall
+// RegTel Tweak v1.0.2 - Fixed Recursion & Deadlocks
 #import <sqlite3.h>
+#import <dlfcn.h>
 
 // Declarations of Telegram classes to avoid compiler warnings
 @interface TelegramUI_ItemListController : UIViewController
@@ -33,6 +32,28 @@
 @interface StoreMessage : NSObject
 @property (nonatomic) int32_t ttl;
 @end
+
+// Static variables for caching preferences (Prevents infinite recursion and deadlocks in SQLite and UIFont)
+static BOOL isAntiRecallActive = NO;
+static BOOL isGhostMaster = NO;
+static BOOL isGhostNoRead = NO;
+static BOOL isGhostNoTyping = NO;
+static BOOL isGhostNoOnline = NO;
+static BOOL isGhostStories = NO;
+static BOOL isScreenshotUnblock = NO;
+static NSString *activeFont = nil;
+
+static void updatePreferences() {
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    isAntiRecallActive = [defaults boolForKey:@"regress_antirecall_active"];
+    isGhostMaster = [defaults boolForKey:@"regress_ghost_master"];
+    isGhostNoRead = [defaults boolForKey:@"regress_ghost_noread"];
+    isGhostNoTyping = [defaults boolForKey:@"regress_ghost_notyping"];
+    isGhostNoOnline = [defaults boolForKey:@"regress_ghost_noonline"];
+    isGhostStories = [defaults boolForKey:@"regress_ghost_stories"];
+    isScreenshotUnblock = [defaults boolForKey:@"regress_unblock_screenshots"];
+    activeFont = [defaults stringForKey:@"regress_active_font"];
+}
 
 // MARK: - Hook: Ingesting Regress Settings into Main Telegram Settings
 
@@ -137,8 +158,8 @@
     NSString *requestType = NSStringFromClass([request.body class]);
     
     // 1. Ghost Mode
-    if ([[NSUserDefaults standardUserDefaults] boolForKey:@"regress_ghost_master"]) {
-        if ([[NSUserDefaults standardUserDefaults] boolForKey:@"regress_ghost_noread"]) {
+    if (isGhostMaster) {
+        if (isGhostNoRead) {
             if ([requestType containsString:@"messages_readHistory"] || 
                 [requestType containsString:@"channels_readHistory"] ||
                 [requestType containsString:@"readMentions"] ||
@@ -148,7 +169,7 @@
             }
         }
         
-        if ([[NSUserDefaults standardUserDefaults] boolForKey:@"regress_ghost_notyping"]) {
+        if (isGhostNoTyping) {
             if ([requestType containsString:@"messages_setTyping"] || 
                 [requestType containsString:@"channels_setTyping"]) {
                 NSLog(@"[RegTel] Ghost Mode: Blocked outgoing typing status: %@", requestType);
@@ -156,7 +177,7 @@
             }
         }
         
-        if ([[NSUserDefaults standardUserDefaults] boolForKey:@"regress_ghost_noonline"]) {
+        if (isGhostNoOnline) {
             if ([requestType containsString:@"account_updateStatus"]) {
                 NSLog(@"[RegTel] Ghost Mode: Blocked outgoing online status update: %@", requestType);
                 return; // Drop!
@@ -165,7 +186,7 @@
     }
     
     // 2. Ghost Stories (Anonymous stories view)
-    if ([[NSUserDefaults standardUserDefaults] boolForKey:@"regress_ghost_stories"]) {
+    if (isGhostStories) {
         if ([requestType containsString:@"stories_readStories"] || 
             [requestType containsString:@"readStories"]) {
             NSLog(@"[RegTel] Stories: Blocked stories read notification: %@", requestType);
@@ -174,7 +195,7 @@
     }
     
     // 3. Screenshot Unblocker (Block notification to server)
-    if ([[NSUserDefaults standardUserDefaults] boolForKey:@"regress_unblock_screenshots"]) {
+    if (isScreenshotUnblock) {
         if ([requestType containsString:@"sendScreenshotNotification"] || 
             [requestType containsString:@"messages_sendScreenshotNotification"]) {
             NSLog(@"[RegTel] Screenshot: Blocked screenshot notification to server: %@", requestType);
@@ -191,34 +212,67 @@
 
 // MARK: - Hook: Anti-Recall (SQLite Layer & Caching)
 
+static thread_local bool isInsideSqliteHook = false;
+
 %hookf(int, sqlite3_prepare_v2, sqlite3 *db, const char *zSql, int nByte, sqlite3_stmt **ppStmt, const char **pzTail) {
-    if (zSql != NULL && [[NSUserDefaults standardUserDefaults] boolForKey:@"regress_antirecall_active"]) {
-        NSString *sql = [NSString stringWithUTF8String:zSql];
+    if (isInsideSqliteHook) {
+        return %orig(db, zSql, nByte, ppStmt, pzTail);
+    }
+    
+    if (zSql != NULL && isAntiRecallActive) {
+        const char *deleteQueries[] = {
+            "DELETE FROM messages",
+            "delete_message",
+            "DELETE FROM message_history",
+            "delete_message_history"
+        };
         
-        // Intercept delete statements on the message tables
-        if ([sql containsString:@"DELETE FROM messages"] || 
-            [sql containsString:@"delete_message"] || 
-            [sql containsString:@"DELETE FROM message_history"] ||
-            [sql containsString:@"delete_message_history"]) {
-            
+        BOOL isDeleteQuery = NO;
+        for (int i = 0; i < 4; i++) {
+            if (strstr(zSql, deleteQueries[i]) != NULL) {
+                isDeleteQuery = YES;
+                break;
+            }
+        }
+        
+        if (isDeleteQuery) {
             NSLog(@"[RegTel] Anti-Recall: Blocked local SQLite message deletion: %s", zSql);
             
+            isInsideSqliteHook = true;
+            
             // Extract numerical IDs for detailed message caching
-            NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"[0-9]{5,20}" options:0 error:nil];
-            NSTextCheckingResult *match = [regex firstMatchInString:sql options:0 range:NSMakeRange(0, sql.length)];
-            if (match) {
-                NSString *matchStr = [sql substringWithRange:match.range];
-                int64_t msgId = [matchStr longLongValue];
-                
-                // Track details in cache (default mock content since the raw message is preserved in DB anyway!)
-                [[AyuMessageTracker shared] registerDetailedMessageDeletionWithMessageId:msgId 
-                                                                               chatId:12345 // Fallback generic chat
-                                                                           senderName:@"Собеседник" 
-                                                                                 text:@"[Удаленное сообщение]" 
-                                                                                 date:(int32_t)[[NSDate date] timeIntervalSince1970]];
+            long long msgId = 0;
+            const char *p = zSql;
+            while (*p) {
+                if (isdigit(*p)) {
+                    long long val = 0;
+                    int digitCount = 0;
+                    while (isdigit(*p)) {
+                        val = val * 10 + (*p - '0');
+                        p++;
+                        digitCount++;
+                    }
+                    if (digitCount >= 5 && digitCount <= 20) {
+                        msgId = val;
+                        break;
+                    }
+                } else {
+                    p++;
+                }
             }
             
-            // Bypass SQL execution: compiled statement set to NULL
+            if (msgId != 0) {
+                dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+                    [[AyuMessageTracker shared] registerDetailedMessageDeletionWithMessageId:msgId 
+                                                                                   chatId:12345 
+                                                                               senderName:@"Собеседник" 
+                                                                                     text:@"[Удаленное сообщение]" 
+                                                                                     date:(int32_t)[[NSDate date] timeIntervalSince1970]];
+                });
+            }
+            
+            isInsideSqliteHook = false;
+            
             *ppStmt = NULL;
             return SQLITE_OK;
         }
@@ -256,15 +310,11 @@
 
 %end
 
-// MARK: - Hook: Local Premium (Disabled client-side to prevent crashes on non-existent Swift model classes)
-
-// MARK: - Hook: Save Self-Destructing Media (Disabled client-side to prevent crashes on non-existent Swift model classes)
-
 // MARK: - Hook: Screenshot Unblocker (System screen capture bypass)
 
 %hook UIScreen
 - (BOOL)isCaptured {
-    if ([[NSUserDefaults standardUserDefaults] boolForKey:@"regress_unblock_screenshots"]) {
+    if (isScreenshotUnblock) {
         return NO; // Tricking iOS to believe screen is not recording
     }
     return %orig;
@@ -334,9 +384,9 @@
 %hook UIFont
 
 + (UIFont *)fontWithName:(NSString *)fontName size:(CGFloat)fontSize {
-    NSString *customFont = [[NSUserDefaults standardUserDefaults] stringForKey:@"regress_active_font"];
+    NSString *customFont = activeFont;
     if (customFont != nil && ![customFont isEqualToString:@"Системный"]) {
-        UIFont *font = [UIFont fontWithName:customFont size:fontSize];
+        UIFont *font = %orig(customFont, fontSize);
         if (font != nil) {
             return font;
         }
@@ -345,7 +395,7 @@
 }
 
 + (UIFont *)systemFontOfSize:(CGFloat)fontSize {
-    NSString *customFont = [[NSUserDefaults standardUserDefaults] stringForKey:@"regress_active_font"];
+    NSString *customFont = activeFont;
     if (customFont != nil && ![customFont isEqualToString:@"Системный"]) {
         UIFont *font = [UIFont fontWithName:customFont size:fontSize];
         if (font != nil) {
@@ -356,7 +406,7 @@
 }
 
 + (UIFont *)boldSystemFontOfSize:(CGFloat)fontSize {
-    NSString *customFont = [[NSUserDefaults standardUserDefaults] stringForKey:@"regress_active_font"];
+    NSString *customFont = activeFont;
     if (customFont != nil && ![customFont isEqualToString:@"Системный"]) {
         NSString *boldFontName = [customFont stringByAppendingString:@"-Bold"];
         UIFont *font = [UIFont fontWithName:boldFontName size:fontSize];
@@ -374,13 +424,22 @@
 
 // MARK: - Hook Initialization & Dynamic Class Resolver
 
-#import <dlfcn.h>
-
 %ctor {
     // 1. Explicitly load Telegram's internal frameworks to ensure their classes are registered in the runtime
     dlopen("@executable_path/Frameworks/MTProtoKit.framework/MTProtoKit", RTLD_NOW);
     dlopen("@executable_path/Frameworks/Display.framework/Display", RTLD_NOW);
     dlopen("@executable_path/Frameworks/TelegramUI.framework/TelegramUI", RTLD_NOW);
+    
+    // Initialize preferences cache
+    updatePreferences();
+    
+    // Listen for preference changes to update the cache dynamically
+    [[NSNotificationCenter defaultCenter] addObserverForName:NSUserDefaultsDidChangeNotification
+                                                      object:nil
+                                                       queue:[NSOperationQueue mainQueue]
+                                                  usingBlock:^(NSNotification *note) {
+                                                      updatePreferences();
+                                                  }];
     
     // 2. Initialize MTProtoHooks if MTProto class is resolved
     Class mtProtoClass = objc_getClass("MTProto");
